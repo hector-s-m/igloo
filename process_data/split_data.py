@@ -1,14 +1,16 @@
 """
-Split loop data into train/val sets using sequence clustering.
-
-Testing is done separately with a dedicated benchmark dataset, so this
-script only produces train and val splits.
-
-Clusters loop sequences at a given identity threshold using MMseqs2,
-then splits by cluster so no similar sequences leak between sets.
+Split loop data into train/val sets using pre-computed structural clusters
+or sequence clustering. Testing is done separately with a benchmark dataset.
 
 Usage:
-    # With MMseqs2 clustering (recommended for high-quality splits)
+    # Using pre-computed TM-score clusters (recommended)
+    python process_data/split_data.py \
+        --input loops.jsonl \
+        --output_dir splits/ \
+        --cluster_csv SNAC-DataBase/cluster_information/ab_complexes/tm_threshold_0p90_summary.csv \
+        --seed 42
+
+    # Using MMseqs2 sequence clustering
     python process_data/split_data.py \
         --input loops.jsonl \
         --output_dir splits/ \
@@ -22,8 +24,7 @@ Usage:
         --no_cluster \
         --seed 42
 
-Requires: MMseqs2 installed (unless --no_cluster is used)
-    pip install mmseqs
+Requires: MMseqs2 (pip install mmseqs) only if not using --cluster_csv
 """
 
 import argparse
@@ -52,22 +53,37 @@ def load_loops(input_path: str) -> list[dict]:
         raise ValueError("Unsupported format. Use .jsonl or .parquet.")
 
 
+def load_structural_clusters(cluster_csv: str) -> dict[str, str]:
+    """
+    Load pre-computed TM-score clusters from a CSV.
+
+    Expected format (from cluster_information/):
+        Representative_Complex,Complexes,Size_of_Cluster
+        1CE1-...,  "1CE1-...,1E4X-...,3CXD-...",  14
+
+    Returns:
+        dict mapping complex_name -> cluster_representative
+    """
+    df = pd.read_csv(cluster_csv)
+    name_to_cluster = {}
+    for _, row in df.iterrows():
+        rep = row["Representative_Complex"]
+        members = row["Complexes"].split(",")
+        for member in members:
+            name_to_cluster[member.strip()] = rep
+    return name_to_cluster
+
+
 def cluster_with_mmseqs2(
     sequences: dict[str, str], identity: float = 0.9, coverage: float = 0.8
 ) -> dict[str, str]:
     """
     Cluster sequences using MMseqs2.
 
-    Args:
-        sequences: dict mapping sequence_id -> amino acid sequence
-        identity: minimum sequence identity threshold (0-1)
-        coverage: minimum coverage threshold (0-1)
-
     Returns:
         dict mapping sequence_id -> cluster_representative_id
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Write FASTA
         fasta_path = os.path.join(tmpdir, "seqs.fasta")
         with open(fasta_path, "w") as f:
             for seq_id, seq in sequences.items():
@@ -77,13 +93,10 @@ def cluster_with_mmseqs2(
         cluster_path = os.path.join(tmpdir, "clusterDB")
         tsv_path = os.path.join(tmpdir, "clusters.tsv")
 
-        # Create MMseqs2 database
         subprocess.run(
             ["mmseqs", "createdb", fasta_path, db_path],
             check=True, capture_output=True,
         )
-
-        # Cluster
         subprocess.run(
             [
                 "mmseqs", "cluster", db_path, cluster_path,
@@ -94,21 +107,17 @@ def cluster_with_mmseqs2(
             ],
             check=True, capture_output=True,
         )
-
-        # Convert to TSV
         subprocess.run(
             ["mmseqs", "createtsv", db_path, db_path, cluster_path, tsv_path],
             check=True, capture_output=True,
         )
 
-        # Parse TSV: columns are [representative_id, member_id]
         seq_to_cluster = {}
         with open(tsv_path) as f:
             for line in f:
                 parts = line.strip().split("\t")
                 if len(parts) >= 2:
-                    rep_id, member_id = parts[0], parts[1]
-                    seq_to_cluster[member_id] = rep_id
+                    seq_to_cluster[parts[1]] = parts[0]
 
     return seq_to_cluster
 
@@ -120,7 +129,7 @@ def split_by_clusters(
     Assign clusters to train/val splits.
 
     Returns:
-        dict mapping cluster_id -> split name ("train" or "val")
+        dict mapping cluster_id -> "train" or "val"
     """
     unique_clusters = list(set(cluster_ids))
     random.seed(seed)
@@ -130,10 +139,7 @@ def split_by_clusters(
 
     cluster_to_split = {}
     for i, c in enumerate(unique_clusters):
-        if i < n_train:
-            cluster_to_split[c] = "train"
-        else:
-            cluster_to_split[c] = "val"
+        cluster_to_split[c] = "train" if i < n_train else "val"
 
     return cluster_to_split
 
@@ -152,7 +158,7 @@ def write_jsonl(data: list[dict], path: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Split loop data into train/val with sequence clustering. "
+        description="Split loop data into train/val with structural or sequence clustering. "
                     "Testing is done with a separate benchmark dataset."
     )
     parser.add_argument(
@@ -164,8 +170,14 @@ def parse_args():
         help="Directory to write train/val JSONL files.",
     )
     parser.add_argument(
+        "--cluster_csv", type=str, default=None,
+        help="Pre-computed TM-score cluster CSV (e.g., tm_threshold_0p90_summary.csv). "
+             "Recommended over MMseqs2 for structural similarity-aware splits.",
+    )
+    parser.add_argument(
         "--identity", type=float, default=0.9,
-        help="MMseqs2 sequence identity threshold (default: 0.9).",
+        help="MMseqs2 sequence identity threshold (default: 0.9). "
+             "Only used if --cluster_csv is not provided.",
     )
     parser.add_argument(
         "--coverage", type=float, default=0.8,
@@ -181,7 +193,7 @@ def parse_args():
     )
     parser.add_argument(
         "--no_cluster", action="store_true",
-        help="Skip MMseqs2 clustering; split by parent antibody ID instead.",
+        help="Skip all clustering; split by parent antibody ID instead.",
     )
     return parser.parse_args()
 
@@ -195,73 +207,89 @@ def main():
     data = load_loops(args.input)
     print(f"  Loaded {len(data)} loops")
 
-    if args.no_cluster:
-        # Split by parent antibody ID (all loops from one antibody stay together)
-        print("Splitting by parent antibody ID (no clustering)...")
-        parent_ids = list(set(get_parent_id(d["loop_id"]) for d in data))
-        cluster_to_split = split_by_clusters(
-            parent_ids, args.train_frac, args.seed
-        )
-        loop_to_split = {}
+    if args.cluster_csv:
+        # --- Structural clustering from pre-computed TM-score CSV ---
+        print(f"Loading structural clusters from {args.cluster_csv}...")
+        name_to_cluster = load_structural_clusters(args.cluster_csv)
+
+        # Map loop_ids to clusters via their parent complex name
+        loop_to_cluster = {}
+        unmatched = 0
         for d in data:
             parent = get_parent_id(d["loop_id"])
-            loop_to_split[d["loop_id"]] = cluster_to_split[parent]
+            if parent in name_to_cluster:
+                loop_to_cluster[d["loop_id"]] = name_to_cluster[parent]
+            else:
+                # Unmatched loops get their own singleton cluster
+                loop_to_cluster[d["loop_id"]] = parent
+                unmatched += 1
+
+        unique_clusters = list(set(loop_to_cluster.values()))
+        print(f"  {len(name_to_cluster)} complexes in cluster CSV")
+        print(f"  {len(unique_clusters)} clusters covering input data ({unmatched} loops unmatched)")
+
+        cluster_to_split = split_by_clusters(unique_clusters, args.train_frac, args.seed)
+        loop_to_split = {
+            lid: cluster_to_split[cluster]
+            for lid, cluster in loop_to_cluster.items()
+        }
+
+    elif args.no_cluster:
+        # --- Split by parent antibody ID ---
+        print("Splitting by parent antibody ID (no clustering)...")
+        parent_ids = list(set(get_parent_id(d["loop_id"]) for d in data))
+        cluster_to_split = split_by_clusters(parent_ids, args.train_frac, args.seed)
+        loop_to_split = {
+            d["loop_id"]: cluster_to_split[get_parent_id(d["loop_id"])]
+            for d in data
+        }
+
     else:
-        # 2. Deduplicate sequences for clustering
+        # --- MMseqs2 sequence clustering ---
         print(f"Clustering loop sequences at {args.identity:.0%} identity...")
         seq_to_id = {}
         for d in data:
             seq_to_id.setdefault(d["loop_sequence"], d["loop_id"])
 
         unique_seqs_for_clustering = {seq_to_id[seq]: seq for seq in seq_to_id}
-
-        # 3. Run MMseqs2
         seq_to_cluster = cluster_with_mmseqs2(
             unique_seqs_for_clustering, identity=args.identity, coverage=args.coverage
         )
 
-        # Map all loop_ids to their cluster representative
         loop_to_cluster = {}
         for d in data:
             rep_lid = seq_to_id[d["loop_sequence"]]
-            cluster_rep = seq_to_cluster.get(rep_lid, rep_lid)
-            loop_to_cluster[d["loop_id"]] = cluster_rep
+            loop_to_cluster[d["loop_id"]] = seq_to_cluster.get(rep_lid, rep_lid)
 
-        # 4. Split clusters
         unique_clusters = list(set(loop_to_cluster.values()))
         print(f"  {len(unique_seqs_for_clustering)} unique sequences -> {len(unique_clusters)} clusters")
-        cluster_to_split = split_by_clusters(
-            unique_clusters, args.train_frac, args.seed
-        )
-
+        cluster_to_split = split_by_clusters(unique_clusters, args.train_frac, args.seed)
         loop_to_split = {
             lid: cluster_to_split[cluster]
             for lid, cluster in loop_to_cluster.items()
         }
 
-    # 5. Partition data
+    # 2. Partition data
     splits = defaultdict(list)
     for d in data:
-        split_name = loop_to_split[d["loop_id"]]
-        splits[split_name].append(d)
+        splits[loop_to_split[d["loop_id"]]].append(d)
 
-    # 6. Remove sequence overlaps from val (extra safety)
+    # 3. Remove sequence overlaps from val (extra safety)
     train_seqs = set(d["loop_sequence"] for d in splits["train"])
     splits["val"] = [d for d in splits["val"] if d["loop_sequence"] not in train_seqs]
 
-    # 7. Write outputs
+    # 4. Write outputs
     for split_name in ["train", "val"]:
         out_path = os.path.join(args.output_dir, f"{split_name}.jsonl")
         write_jsonl(splits[split_name], out_path)
         n_unique = len(set(d["loop_sequence"] for d in splits[split_name]))
         print(f"  {split_name}: {len(splits[split_name])} loops ({n_unique} unique sequences) -> {out_path}")
 
-    # 8. Report overlaps
+    # 5. Report
     final_train = set(d["loop_sequence"] for d in splits["train"])
     final_val = set(d["loop_sequence"] for d in splits["val"])
     print(f"\nSequence overlap train/val after filtering: {len(final_train & final_val)}")
 
-    # 9. Loop type distribution
     for split_name in ["train", "val"]:
         types = defaultdict(int)
         for d in splits[split_name]:
