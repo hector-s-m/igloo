@@ -8,3 +8,11 @@ __pycache__/
 *.txt
 !requirements.txt
 paper_analyses/unused
+
+# Data directories (keep structure, ignore contents)
+training/ab_complexes/*
+training/nb_complexes/*
+benchmark/*
+!training/ab_complexes/.gitkeep
+!training/nb_complexes/.gitkeep
+!benchmark/.gitkeep

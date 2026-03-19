@@ -1,5 +1,8 @@
 """
-Split loop data into train/val/test sets using sequence clustering.
+Split loop data into train/val sets using sequence clustering.
+
+Testing is done separately with a dedicated benchmark dataset, so this
+script only produces train and val splits.
 
 Clusters loop sequences at a given identity threshold using MMseqs2,
 then splits by cluster so no similar sequences leak between sets.
@@ -20,7 +23,7 @@ Usage:
         --seed 42
 
 Requires: MMseqs2 installed (unless --no_cluster is used)
-    conda install -c conda-forge -c bioconda mmseqs2
+    pip install mmseqs
 """
 
 import argparse
@@ -111,36 +114,32 @@ def cluster_with_mmseqs2(
 
 
 def split_by_clusters(
-    cluster_ids: list[str], train_frac: float = 0.8, val_frac: float = 0.1, seed: int = 42
+    cluster_ids: list[str], train_frac: float = 0.9, seed: int = 42
 ) -> dict[str, str]:
     """
-    Assign clusters to train/val/test splits.
+    Assign clusters to train/val splits.
 
     Returns:
-        dict mapping cluster_id -> split name ("train", "val", "test")
+        dict mapping cluster_id -> split name ("train" or "val")
     """
     unique_clusters = list(set(cluster_ids))
     random.seed(seed)
     random.shuffle(unique_clusters)
 
     n_train = int(len(unique_clusters) * train_frac)
-    n_val = int(len(unique_clusters) * val_frac)
 
     cluster_to_split = {}
     for i, c in enumerate(unique_clusters):
         if i < n_train:
             cluster_to_split[c] = "train"
-        elif i < n_train + n_val:
-            cluster_to_split[c] = "val"
         else:
-            cluster_to_split[c] = "test"
+            cluster_to_split[c] = "val"
 
     return cluster_to_split
 
 
 def get_parent_id(loop_id: str) -> str:
     """Extract parent antibody ID from loop_id (e.g., '5L6Y-ASU0_H1' -> '5L6Y-ASU0')."""
-    # Split on last underscore + loop type suffix
     parts = loop_id.rsplit("_", 1)
     return parts[0] if len(parts) > 1 else loop_id
 
@@ -153,7 +152,8 @@ def write_jsonl(data: list[dict], path: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Split loop data into train/val/test with sequence clustering."
+        description="Split loop data into train/val with sequence clustering. "
+                    "Testing is done with a separate benchmark dataset."
     )
     parser.add_argument(
         "--input", type=str, required=True,
@@ -161,7 +161,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output_dir", type=str, required=True,
-        help="Directory to write train/val/test JSONL files.",
+        help="Directory to write train/val JSONL files.",
     )
     parser.add_argument(
         "--identity", type=float, default=0.9,
@@ -172,12 +172,8 @@ def parse_args():
         help="MMseqs2 coverage threshold (default: 0.8).",
     )
     parser.add_argument(
-        "--train_frac", type=float, default=0.8,
-        help="Fraction of clusters for training (default: 0.8).",
-    )
-    parser.add_argument(
-        "--val_frac", type=float, default=0.1,
-        help="Fraction of clusters for validation (default: 0.1).",
+        "--train_frac", type=float, default=0.9,
+        help="Fraction of clusters for training (default: 0.9, rest goes to val).",
     )
     parser.add_argument(
         "--seed", type=int, default=42,
@@ -204,7 +200,7 @@ def main():
         print("Splitting by parent antibody ID (no clustering)...")
         parent_ids = list(set(get_parent_id(d["loop_id"]) for d in data))
         cluster_to_split = split_by_clusters(
-            parent_ids, args.train_frac, args.val_frac, args.seed
+            parent_ids, args.train_frac, args.seed
         )
         loop_to_split = {}
         for d in data:
@@ -214,15 +210,9 @@ def main():
         # 2. Deduplicate sequences for clustering
         print(f"Clustering loop sequences at {args.identity:.0%} identity...")
         seq_to_id = {}
-        id_to_seq = {}
         for d in data:
-            lid = d["loop_id"]
-            seq = d["loop_sequence"]
-            id_to_seq[lid] = seq
-            seq_to_id.setdefault(seq, lid)  # deduplicate: one representative per unique sequence
+            seq_to_id.setdefault(d["loop_sequence"], d["loop_id"])
 
-        # Use unique sequences for clustering
-        unique_seqs = {v: k for k, v in seq_to_id.items()}  # id -> seq
         unique_seqs_for_clustering = {seq_to_id[seq]: seq for seq in seq_to_id}
 
         # 3. Run MMseqs2
@@ -233,18 +223,15 @@ def main():
         # Map all loop_ids to their cluster representative
         loop_to_cluster = {}
         for d in data:
-            lid = d["loop_id"]
-            seq = d["loop_sequence"]
-            # Find the representative for this sequence
-            rep_lid = seq_to_id[seq]
+            rep_lid = seq_to_id[d["loop_sequence"]]
             cluster_rep = seq_to_cluster.get(rep_lid, rep_lid)
-            loop_to_cluster[lid] = cluster_rep
+            loop_to_cluster[d["loop_id"]] = cluster_rep
 
         # 4. Split clusters
         unique_clusters = list(set(loop_to_cluster.values()))
         print(f"  {len(unique_seqs_for_clustering)} unique sequences -> {len(unique_clusters)} clusters")
         cluster_to_split = split_by_clusters(
-            unique_clusters, args.train_frac, args.val_frac, args.seed
+            unique_clusters, args.train_frac, args.seed
         )
 
         loop_to_split = {
@@ -258,17 +245,12 @@ def main():
         split_name = loop_to_split[d["loop_id"]]
         splits[split_name].append(d)
 
-    # 6. Remove sequence overlaps from val/test (extra safety)
+    # 6. Remove sequence overlaps from val (extra safety)
     train_seqs = set(d["loop_sequence"] for d in splits["train"])
     splits["val"] = [d for d in splits["val"] if d["loop_sequence"] not in train_seqs]
-    val_seqs = set(d["loop_sequence"] for d in splits["val"])
-    splits["test"] = [
-        d for d in splits["test"]
-        if d["loop_sequence"] not in train_seqs and d["loop_sequence"] not in val_seqs
-    ]
 
     # 7. Write outputs
-    for split_name in ["train", "val", "test"]:
+    for split_name in ["train", "val"]:
         out_path = os.path.join(args.output_dir, f"{split_name}.jsonl")
         write_jsonl(splits[split_name], out_path)
         n_unique = len(set(d["loop_sequence"] for d in splits[split_name]))
@@ -277,14 +259,10 @@ def main():
     # 8. Report overlaps
     final_train = set(d["loop_sequence"] for d in splits["train"])
     final_val = set(d["loop_sequence"] for d in splits["val"])
-    final_test = set(d["loop_sequence"] for d in splits["test"])
-    print(f"\nSequence overlaps after filtering:")
-    print(f"  train/val:  {len(final_train & final_val)}")
-    print(f"  train/test: {len(final_train & final_test)}")
-    print(f"  val/test:   {len(final_val & final_test)}")
+    print(f"\nSequence overlap train/val after filtering: {len(final_train & final_val)}")
 
     # 9. Loop type distribution
-    for split_name in ["train", "val", "test"]:
+    for split_name in ["train", "val"]:
         types = defaultdict(int)
         for d in splits[split_name]:
             lt = d.get("loop_type", d["loop_id"].rsplit("_", 1)[-1])
