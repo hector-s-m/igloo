@@ -1,23 +1,30 @@
 """
 Preprocess a PDB dataset for Igloo training.
 
-Reads a master CSV with antibody/nanobody complex metadata and PDB files,
-extracts VH/VL sequences, runs ANARCI for AHO alignment, and outputs an
-Igloo-compatible CSV.
+Scans a directory of PDB files (or reads a master CSV), extracts VH/VL
+sequences, runs ANARCI for AHO alignment, and outputs an Igloo-compatible CSV.
 
-Expects the CSV to have a 'Name' column where PDB filenames encode chain
-IDs in the format: VH_<chain>-VL_<chain> (e.g., 'VH_H-VL_L-Ag_C') or
-VHH_<chain> for nanobodies.
+PDB filenames must encode chain IDs in the format:
+    VH_<chain>-VL_<chain> (e.g., '1A2Y-ASU0-VH_B-VL_A-Ag_C.pdb')
+    VHH_<chain> for nanobodies (e.g., '8FSL-ASU1-VHH_A-Ag_C.pdb')
 
 Usage:
+    # From a directory of PDB files (no CSV needed)
     python process_data/prepare_pdb_dataset.py \
-        --input_csv path/to/complexes_curated.csv \
-        --pdb_dir path/to/pdbs/ \
+        --pdb_dir training/ab_complexes/ \
+        --output_csv dataset.csv \
+        --ncpu 16
+
+    # From a master CSV with a 'Name' column
+    python process_data/prepare_pdb_dataset.py \
+        --input_csv complexes_curated.csv \
+        --pdb_dir training/ab_complexes/ \
         --output_csv dataset.csv \
         --ncpu 16
 """
 
 import argparse
+import glob
 import re
 import os
 import pandas as pd
@@ -48,7 +55,7 @@ def parse_pdb_filename(name: str) -> dict:
     or VHH_<chain>[-Ag_<chain>] for nanobodies.
 
     Examples:
-        '5L6Y-ASU0-VH_H-VL_L-Ag_C' -> {'heavy_chain_id': 'H', 'light_chain_id': 'L'}
+        '1A2Y-ASU0-VH_B-VL_A-Ag_C' -> {'heavy_chain_id': 'B', 'light_chain_id': 'A'}
         '7y7m-ASU1-frame0-VH_F-VL_G-Ag_C' -> {'heavy_chain_id': 'F', 'light_chain_id': 'G'}
         '8FSL-ASU1-VHH_A-Ag_C' -> {'heavy_chain_id': 'A', 'light_chain_id': None}  (nanobody)
     """
@@ -151,15 +158,20 @@ def run_anarci_alignment(sequences: list, ncpu: int = 1) -> list:
 
 def find_pdb_file(name: str, pdb_dir: str) -> str:
     """Find the PDB file for a given entry name."""
-    # Try exact match first
     pdb_path = os.path.join(pdb_dir, f"{name}.pdb")
     if os.path.exists(pdb_path):
         return pdb_path
-    # Try .cif
     cif_path = os.path.join(pdb_dir, f"{name}.cif")
     if os.path.exists(cif_path):
         return cif_path
     return None
+
+
+def scan_pdb_dir(pdb_dir: str) -> pd.DataFrame:
+    """Build a DataFrame from PDB filenames in a directory (no CSV needed)."""
+    pdb_files = sorted(glob.glob(os.path.join(pdb_dir, "*.pdb")))
+    names = [os.path.splitext(os.path.basename(f))[0] for f in pdb_files]
+    return pd.DataFrame({"Name": names})
 
 
 def parse_args():
@@ -167,24 +179,25 @@ def parse_args():
         description="Preprocess a PDB complex dataset for Igloo training."
     )
     parser.add_argument(
-        "--input_csv", type=str, required=True,
-        help="Path to master CSV with a 'Name' column encoding chain IDs (e.g., *_complexes_curated.csv)."
+        "--input_csv", type=str, default=None,
+        help="Path to master CSV with a 'Name' column. If not provided, "
+             "PDB filenames are scanned from --pdb_dir."
     )
     parser.add_argument(
         "--pdb_dir", type=str, required=True,
-        help="Directory containing PDB files."
+        help="Directory containing PDB files.",
     )
     parser.add_argument(
         "--output_csv", type=str, required=True,
-        help="Path to output Igloo-compatible CSV."
+        help="Path to output Igloo-compatible CSV.",
     )
     parser.add_argument(
         "--ncpu", type=int, default=1,
-        help="Number of CPUs for ANARCI alignment."
+        help="Number of CPUs for ANARCI alignment.",
     )
     parser.add_argument(
         "--include_nanobodies", action="store_true",
-        help="Include VHH (nanobody) entries (default: antibodies only)."
+        help="Include VHH (nanobody) entries (default: antibodies only).",
     )
     return parser.parse_args()
 
@@ -192,9 +205,13 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # 1. Read master CSV
-    print(f"Reading CSV: {args.input_csv}")
-    input_df = pd.read_csv(args.input_csv)
+    # 1. Build entry list from CSV or by scanning PDB directory
+    if args.input_csv:
+        print(f"Reading CSV: {args.input_csv}")
+        input_df = pd.read_csv(args.input_csv)
+    else:
+        print(f"Scanning PDB files in: {args.pdb_dir}")
+        input_df = scan_pdb_dir(args.pdb_dir)
     print(f"  Total entries: {len(input_df)}")
 
     # 2. Parse filenames to extract chain IDs
@@ -248,7 +265,7 @@ def main():
     print(f"  Extracted: {len(records)} | Missing PDBs: {missing_pdbs} | Failed: {failed_extractions}")
 
     if len(records) == 0:
-        print("Error: No sequences extracted. Check PDB directory and CSV paths.")
+        print("Error: No sequences extracted. Check PDB directory and paths.")
         return
 
     result_df = pd.DataFrame(records)
@@ -264,7 +281,6 @@ def main():
     # Align light chains (if present)
     if result_df["fv_light"].notna().any():
         light_seqs = result_df["fv_light"].tolist()
-        # Replace NaN with empty string for ANARCI, then restore None
         light_seqs_clean = [s if pd.notna(s) else "" for s in light_seqs]
         light_aho = run_anarci_alignment(light_seqs_clean, ncpu=args.ncpu)
         result_df["fv_light_aho"] = light_aho
