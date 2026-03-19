@@ -7,7 +7,7 @@ Usage:
     python process_data/split_data.py \
         --input loops.jsonl \
         --output_dir splits/ \
-        --cluster_csv SNAC-DataBase/cluster_information/ab_complexes/tm_threshold_0p90_summary.csv \
+        --cluster_csv cluster_information/ab_complexes/tm_threshold_0p90_summary.csv \
         --seed 42
 
     # Using MMseqs2 sequence clustering
