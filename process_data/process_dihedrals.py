@@ -70,15 +70,15 @@ def get_loop_structure(chain_id, start_res_id_chain, end_res_id_chain, pdb_path,
         output["bfactor"] = np.mean(bfactor[start_res_id_chain:end_res_id_chain]).item()
     return output
 
-def process_one_loop(aho_seq, loop_type, pdb_path, keep_bfactor=False):
+def process_one_loop(aho_seq, loop_type, pdb_path, keep_bfactor=False, pdb_chain_id=None):
     loop_seq = aho_seq[AHO_CUTOFFS[loop_type][0]:AHO_CUTOFFS[loop_type][1]].replace('-', '')
     if len(loop_seq) == 0:
         return None
 
     start_res_id_chain = len(aho_seq[:AHO_CUTOFFS[loop_type][0]].replace('-', ''))
     end_res_id_chain = len(aho_seq[:AHO_CUTOFFS[loop_type][1]].replace('-', ''))
-    chain_id = loop_type[0]
-    
+    chain_id = pdb_chain_id if pdb_chain_id else loop_type[0]
+
     output = get_loop_structure(chain_id, start_res_id_chain, end_res_id_chain, pdb_path, keep_bfactor)
     output['loop_sequence'] = loop_seq
     return output
@@ -86,11 +86,18 @@ def process_one_loop(aho_seq, loop_type, pdb_path, keep_bfactor=False):
 def process_loops_from_one_entry(idx):
     entry = df.iloc[idx]
     loop_types = ['L1', 'L2', 'L3', 'L4', 'H1', 'H2', 'H3', 'H4']
+    # Build chain ID mapping from CSV columns if provided
+    chain_id_map = {}
+    if HEAVY_CHAIN_ID_KEY and HEAVY_CHAIN_ID_KEY in entry.index:
+        chain_id_map['H'] = str(entry[HEAVY_CHAIN_ID_KEY])
+    if LIGHT_CHAIN_ID_KEY and LIGHT_CHAIN_ID_KEY in entry.index:
+        chain_id_map['L'] = str(entry[LIGHT_CHAIN_ID_KEY])
     outputs = []
     for loop_type in loop_types:
         loop_data = {'loop_id': f"{entry[ID_KEY]}_{loop_type}", "loop_type": loop_type, ID_KEY: entry[ID_KEY]}
         seq = entry[AHO_LIGHT_KEY] if loop_type.startswith('L') else entry[AHO_HEAVY_KEY]
-        dihedral_loop_data = process_one_loop(seq, loop_type, entry['pdb_path'], keep_bfactor=KEEP_BFACTOR)
+        pdb_chain_id = chain_id_map.get(loop_type[0])
+        dihedral_loop_data = process_one_loop(seq, loop_type, entry['pdb_path'], keep_bfactor=KEEP_BFACTOR, pdb_chain_id=pdb_chain_id)
         if dihedral_loop_data is None:
             return [] # Skip this entry if any loop data is None
         else:
@@ -130,7 +137,7 @@ def get_loop_regions(df, aho_light_key, aho_heavy_key):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Process loops and calculate dihedral angles.")
-    parser.add_argument('--structure_dir', type=str, required=True, help="Directory containing PDB files.")
+    parser.add_argument('--structure_dir', type=str, default=None, help="Directory containing PDB files. Not required if the input DataFrame has a 'pdb_path' column.")
     parser.add_argument('--df_path', type=str, required=True, help="Path to the DataFrame file (CSV or Parquet).")
     parser.add_argument('--parquet_output_path', type=str, default=None, help="Path to save the output Parquet file.")
     parser.add_argument('--jsonl_output_path', type=str, default=None, help="Path to save the output JSONL file with loops.")
@@ -141,6 +148,8 @@ def parse_args():
     parser.add_argument('--chunk', type=int, default=None, help="Chunk index for processing")
     parser.add_argument('--chunk_total', type=int, default=None, help="Total number of chunks for processing")
     parser.add_argument('--bfactor', action='store_true', help="Calculate and include B-factors in the output.")
+    parser.add_argument('--heavy_chain_id_key', type=str, default=None, help="CSV column containing the PDB chain ID for the heavy chain (e.g., 'F'). If not provided, defaults to 'H'.")
+    parser.add_argument('--light_chain_id_key', type=str, default=None, help="CSV column containing the PDB chain ID for the light chain (e.g., 'G'). If not provided, defaults to 'L'.")
     return parser.parse_args()
 
 
@@ -150,6 +159,8 @@ if __name__ == "__main__":
     AHO_LIGHT_KEY = args.aho_light_key
     AHO_HEAVY_KEY = args.aho_heavy_key
     KEEP_BFACTOR = args.bfactor
+    HEAVY_CHAIN_ID_KEY = args.heavy_chain_id_key
+    LIGHT_CHAIN_ID_KEY = args.light_chain_id_key
 
     if args.df_path.endswith('.csv'):
         df = pd.read_csv(args.df_path)
@@ -158,7 +169,10 @@ if __name__ == "__main__":
     else:
         raise ValueError("Unsupported file format for df_path. Use .csv or .parquet.")
 
-    df['pdb_path'] = args.structure_dir + '/' + df[ID_KEY].astype(str) + '.pdb'
+    if 'pdb_path' not in df.columns:
+        if args.structure_dir is None:
+            raise ValueError("Either provide --structure_dir or include a 'pdb_path' column in the input DataFrame.")
+        df['pdb_path'] = args.structure_dir + '/' + df[ID_KEY].astype(str) + '.pdb'
 
     if args.chunk is not None and args.chunk_total is not None:
         chunk_size = len(df) // args.chunk_total

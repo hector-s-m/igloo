@@ -6,4 +6,5 @@ __pycache__/
 *.csv
 *.svg
 *.txt
+!requirements.txt
 paper_analyses/unused

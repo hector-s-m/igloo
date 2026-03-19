@@ -1,0 +1,31 @@
+# Core dependencies (from pyproject.toml)
+torch==2.7.1
+vector-quantize-pytorch==1.22.16
+numpy==1.26.4
+pandas==2.3.0
+scipy==1.15.2
+scikit-learn==1.7.0
+biotite>=0.41.2
+seaborn==0.13.2
+faiss-cpu==1.9.0
+logomaker==0.8.7
+dtaidistance==2.3.13
+fastparquet==2024.11.0
+h5py
+tqdm
+matplotlib
+umap-learn
+wandb
+transformers==4.53.0
+datasets
+accelerate
+einx
+pyarrow
+multiprocess
+httpx
+pdbfixer @ git+https://github.com/openmm/pdbfixer.git
+prescient-ibex
+
+# Data preprocessing (for prepare_pdb_dataset.py and split_data.py)
+anarci
+mmseqs
