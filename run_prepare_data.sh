@@ -19,13 +19,8 @@ DATASET_CSV="training_ab.csv"
 LOOPS_JSONL="training_loops.jsonl"
 SPLITS_DIR="splits"
 
-# ── Step 1: Install dependencies ─────────────────────────────────────────────
-echo "=== Step 1: Installing dependencies ==="
-pip install -r requirements.txt
-pip install -e .
-
-# ── Step 2: Prepare dataset from PDB files ────────────────────────────────────
-echo "=== Step 2: Parsing PDB files → ${DATASET_CSV} ==="
+# ── Step 1: Prepare dataset from PDB files ────────────────────────────────────
+echo "=== Step 1: Parsing PDB files → ${DATASET_CSV} ==="
 RESUME_FLAG=""
 if [[ -f "${DATASET_CSV}" ]]; then
     echo "  Found existing ${DATASET_CSV}, resuming..."
@@ -37,7 +32,7 @@ python process_data/prepare_pdb_dataset.py \
     --ncpu "${NCPU}" \
     ${RESUME_FLAG}
 
-# ── Step 3: Extract dihedral angles ───────────────────────────────────────────
+# ── Step 2: Extract dihedral angles ───────────────────────────────────────────
 echo "=== Step 3: Extracting dihedrals → ${LOOPS_JSONL} ==="
 python process_data/process_dihedrals.py \
     --df_path "${DATASET_CSV}" \
@@ -49,7 +44,7 @@ python process_data/process_dihedrals.py \
     --jsonl_output_path "${LOOPS_JSONL}" \
     --num_workers "${NCPU}"
 
-# ── Step 4: Split into train/val ──────────────────────────────────────────────
+# ── Step 3: Split into train/val ──────────────────────────────────────────────
 echo "=== Step 4: Splitting data → ${SPLITS_DIR}/ ==="
 python process_data/split_data.py \
     --input "${LOOPS_JSONL}" \
