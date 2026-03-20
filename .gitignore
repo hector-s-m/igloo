@@ -1,5 +1,7 @@
 *.ipynb
 *.sh
+!run_prepare_data.sh
+!run_train.sh
 *.parquet
 wandb/
 __pycache__/
