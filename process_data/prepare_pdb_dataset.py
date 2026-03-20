@@ -29,6 +29,7 @@ import re
 import os
 import pandas as pd
 import numpy as np
+import biotite
 import biotite.structure as struc
 import biotite.structure.io.pdb as pdb_reader
 from biotite.structure.info import one_letter_code, amino_acid_names
@@ -85,12 +86,14 @@ def extract_chain_sequence(pdb_path: str, chain_id: str) -> str:
     """Extract amino acid sequence for a given chain from a PDB file."""
     try:
         pdb_file = pdb_reader.PDBFile.read(pdb_path)
-        atom_array = pdb_file.get_structure()
-        # Use first model
-        if atom_array.stack_depth() > 1:
-            atom_array = atom_array[0]
-        else:
-            atom_array = atom_array[0]
+        # Try model=1 first; if the file has no MODEL/ENDMDL records
+        # biotite reports 0 models, so fall back to reading all atoms.
+        try:
+            atom_array = pdb_file.get_structure(model=1)
+        except (biotite.InvalidFileError, IndexError, Exception):
+            atom_array = pdb_file.get_structure()
+            if hasattr(atom_array, 'stack_depth') and atom_array.stack_depth() > 0:
+                atom_array = atom_array[0]
         # Filter to target chain
         chain_atoms = atom_array[atom_array.chain_id == chain_id]
         if len(chain_atoms) == 0:
@@ -199,6 +202,11 @@ def parse_args():
         "--include_nanobodies", action="store_true",
         help="Include VHH (nanobody) entries (default: antibodies only).",
     )
+    parser.add_argument(
+        "--resume_csv", type=str, default=None,
+        help="Path to a partial output CSV from a previous run. "
+             "Already-extracted entries are skipped (resumes from where it left off).",
+    )
     return parser.parse_args()
 
 
@@ -227,14 +235,28 @@ def main():
     input_df = input_df[mask].reset_index(drop=True)
     print(f"  After filtering: {len(input_df)} entries")
 
+    # Load previously extracted entries to skip (resume mode)
+    already_done = set()
+    resumed_records = []
+    if args.resume_csv and os.path.exists(args.resume_csv):
+        prev_df = pd.read_csv(args.resume_csv)
+        already_done = set(prev_df["id"].tolist())
+        resumed_records = prev_df.to_dict("records")
+        print(f"  Resuming: {len(already_done)} entries already extracted, skipping them")
+
     # 4. Find PDB files and extract sequences
     print("Extracting sequences from PDB files...")
-    records = []
+    records = list(resumed_records)
     missing_pdbs = 0
     failed_extractions = 0
+    skipped = 0
 
     for idx, row in tqdm(input_df.iterrows(), total=len(input_df), desc="Extracting sequences"):
         name = row["Name"]
+        if name in already_done:
+            skipped += 1
+            continue
+
         pdb_path = find_pdb_file(name, args.pdb_dir)
         if pdb_path is None:
             missing_pdbs += 1
@@ -262,13 +284,20 @@ def main():
             "pdb_path": pdb_path,
         })
 
-    print(f"  Extracted: {len(records)} | Missing PDBs: {missing_pdbs} | Failed: {failed_extractions}")
+    new_extracted = len(records) - len(resumed_records)
+    print(f"  New: {new_extracted} | Resumed: {len(resumed_records)} | Skipped: {skipped} | Missing PDBs: {missing_pdbs} | Failed: {failed_extractions}")
 
     if len(records) == 0:
         print("Error: No sequences extracted. Check PDB directory and paths.")
         return
 
     result_df = pd.DataFrame(records)
+
+    # Save intermediate CSV (sequences extracted, before alignment)
+    # so that if ANARCI fails, we can resume without re-extracting
+    intermediate_path = args.output_csv.replace(".csv", "_sequences_only.csv")
+    result_df.to_csv(intermediate_path, index=False)
+    print(f"  Saved intermediate sequences to {intermediate_path}")
 
     # 5. Run ANARCI for AHO alignment
     print(f"Running ANARCI AHO alignment (ncpu={args.ncpu})...")
