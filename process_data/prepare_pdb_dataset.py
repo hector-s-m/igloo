@@ -235,14 +235,20 @@ def main():
     input_df = input_df[mask].reset_index(drop=True)
     print(f"  After filtering: {len(input_df)} entries")
 
-    # Load previously extracted entries to skip (resume mode)
+    # Load previously extracted entries to skip (resume from sequences-only CSV)
+    intermediate_path = args.output_csv.replace(".csv", "_sequences_only.csv")
     already_done = set()
     resumed_records = []
-    if args.resume_csv and os.path.exists(args.resume_csv):
+    if os.path.exists(intermediate_path):
+        prev_df = pd.read_csv(intermediate_path)
+        already_done = set(prev_df["id"].tolist())
+        resumed_records = prev_df.to_dict("records")
+        print(f"  Resuming from {intermediate_path}: {len(already_done)} entries already extracted, skipping them")
+    elif args.resume_csv and os.path.exists(args.resume_csv):
         prev_df = pd.read_csv(args.resume_csv)
         already_done = set(prev_df["id"].tolist())
         resumed_records = prev_df.to_dict("records")
-        print(f"  Resuming: {len(already_done)} entries already extracted, skipping them")
+        print(f"  Resuming from {args.resume_csv}: {len(already_done)} entries already extracted, skipping them")
 
     # 4. Find PDB files and extract sequences
     print("Extracting sequences from PDB files...")
@@ -250,6 +256,7 @@ def main():
     missing_pdbs = 0
     failed_extractions = 0
     skipped = 0
+    new_since_last_save = 0
 
     for idx, row in tqdm(input_df.iterrows(), total=len(input_df), desc="Extracting sequences"):
         name = row["Name"]
@@ -283,6 +290,13 @@ def main():
             "light_chain_id": light_chain_id,
             "pdb_path": pdb_path,
         })
+        new_since_last_save += 1
+
+        # Save checkpoint every 1000 new extractions
+        if new_since_last_save >= 1000:
+            pd.DataFrame(records).to_csv(intermediate_path, index=False)
+            print(f"\n  Checkpoint: saved {len(records)} entries to {intermediate_path}")
+            new_since_last_save = 0
 
     new_extracted = len(records) - len(resumed_records)
     print(f"  New: {new_extracted} | Resumed: {len(resumed_records)} | Skipped: {skipped} | Missing PDBs: {missing_pdbs} | Failed: {failed_extractions}")

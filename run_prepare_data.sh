@@ -21,16 +21,10 @@ SPLITS_DIR="splits"
 
 # ── Step 1: Prepare dataset from PDB files ────────────────────────────────────
 echo "=== Step 1: Parsing PDB files → ${DATASET_CSV} ==="
-RESUME_FLAG=""
-if [[ -f "${DATASET_CSV}" ]]; then
-    echo "  Found existing ${DATASET_CSV}, resuming..."
-    RESUME_FLAG="--resume_csv ${DATASET_CSV}"
-fi
 python process_data/prepare_pdb_dataset.py \
     --pdb_dir "${PDB_DIR}" \
     --output_csv "${DATASET_CSV}" \
-    --ncpu "${NCPU}" \
-    ${RESUME_FLAG}
+    --ncpu "${NCPU}"
 
 # ── Step 2: Extract dihedral angles ───────────────────────────────────────────
 echo "=== Step 3: Extracting dihedrals → ${LOOPS_JSONL} ==="
