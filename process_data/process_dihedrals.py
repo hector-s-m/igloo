@@ -80,8 +80,20 @@ def process_one_loop(aho_seq, loop_type, pdb_path, keep_bfactor=False, pdb_chain
     chain_id = pdb_chain_id if pdb_chain_id else loop_type[0]
 
     output = get_loop_structure(chain_id, start_res_id_chain, end_res_id_chain, pdb_path, keep_bfactor)
+    if output is None:
+        return None
     output['loop_sequence'] = loop_seq
     return output
+
+def pool_init(shared_df, shared_globals):
+    global df, ID_KEY, AHO_LIGHT_KEY, AHO_HEAVY_KEY, KEEP_BFACTOR, HEAVY_CHAIN_ID_KEY, LIGHT_CHAIN_ID_KEY
+    df = shared_df
+    ID_KEY = shared_globals['ID_KEY']
+    AHO_LIGHT_KEY = shared_globals['AHO_LIGHT_KEY']
+    AHO_HEAVY_KEY = shared_globals['AHO_HEAVY_KEY']
+    KEEP_BFACTOR = shared_globals['KEEP_BFACTOR']
+    HEAVY_CHAIN_ID_KEY = shared_globals['HEAVY_CHAIN_ID_KEY']
+    LIGHT_CHAIN_ID_KEY = shared_globals['LIGHT_CHAIN_ID_KEY']
 
 def process_loops_from_one_entry(idx):
     entry = df.iloc[idx]
@@ -177,7 +189,10 @@ if __name__ == "__main__":
     if args.chunk is not None and args.chunk_total is not None:
         chunk_size = len(df) // args.chunk_total
         df = df[args.chunk * chunk_size : (args.chunk + 1) * chunk_size]
-    with Pool(processes=args.num_workers) as pool:
+    shared_globals = dict(ID_KEY=ID_KEY, AHO_LIGHT_KEY=AHO_LIGHT_KEY, AHO_HEAVY_KEY=AHO_HEAVY_KEY,
+                          KEEP_BFACTOR=KEEP_BFACTOR, HEAVY_CHAIN_ID_KEY=HEAVY_CHAIN_ID_KEY,
+                          LIGHT_CHAIN_ID_KEY=LIGHT_CHAIN_ID_KEY)
+    with Pool(processes=args.num_workers, initializer=pool_init, initargs=(df, shared_globals)) as pool:
         results = list(tqdm(pool.imap(process_loops_from_one_entry, range(len(df))), total=len(df), desc="Processing loops"))
     outputs = [item for sublist in results for item in sublist]
 
