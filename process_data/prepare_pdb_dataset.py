@@ -139,10 +139,16 @@ def run_anarci_alignment(sequences: list, ncpu: int = 1) -> list:
             aho_seqs.append(None)
             continue
 
-        numbering_list, chain_type = domain[0]
+        # domain is (numbering_list, start_idx, end_idx)
+        numbering_list = domain[0]
+
+        # Get chain type from alignments
+        chain_type = "H"
+        if alignments[i] and len(alignments[i]) > 0:
+            chain_type = alignments[i][0].get("chain_type", "H")
 
         # Determine max AHO position based on chain type
-        max_pos = 148 if chain_type == "L" else 149
+        max_pos = 148 if chain_type in ("L", "K") else 149
 
         # Build gapped AHO sequence
         pos_to_aa = {}
@@ -274,6 +280,16 @@ def main():
 
         heavy_seq = extract_chain_sequence(pdb_path, heavy_chain_id)
         light_seq = extract_chain_sequence(pdb_path, light_chain_id) if light_chain_id else None
+
+        # Fallback: if filename chain IDs don't match, try standardized H/L
+        if heavy_seq is None and heavy_chain_id != "H":
+            heavy_seq = extract_chain_sequence(pdb_path, "H")
+            if heavy_seq is not None:
+                heavy_chain_id = "H"
+        if light_seq is None and light_chain_id and light_chain_id != "L":
+            light_seq = extract_chain_sequence(pdb_path, "L")
+            if light_seq is not None:
+                light_chain_id = "L"
 
         if heavy_seq is None:
             failed_extractions += 1
