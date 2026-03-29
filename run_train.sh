@@ -9,6 +9,7 @@ set -euo pipefail
 ###############################################################################
 
 # ── Configuration ────────────────────────────────────────────────────────────
+export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}$(pwd)/model"
 SPLITS_DIR="splits"
 MODEL_DIR="Igloo_models"
 DEVICE="cuda"
