@@ -268,10 +268,10 @@ class VQVAETrainer:
     def train(self):
         while self.epoch <= self.num_epochs:
             train_loss, train_commit_loss, train_codebook_loss, train_recon_loss, total_dihedral_loss, train_aa_loss, train_loop_length_loss, train_pred_loop_length_loss, train_perplexity = self.train_epoch()
-            if self.scheduler and epoch > self.warmup_epochs:
+            if self.scheduler and self.epoch > self.warmup_epochs:
                 self.scheduler.step()
-                print(f"Learning rate at epoch {epoch}: {self.optimizer.param_groups[0]['lr']:.6f}")
-            print(f'Epoch {epoch}/{self.num_epochs}, Train Loss: {train_loss:.4g}, Train Commitment Loss: {train_commit_loss:.4g}, '
+                print(f"Learning rate at epoch {self.epoch}: {self.optimizer.param_groups[0]['lr']:.6f}")
+            print(f'Epoch {self.epoch}/{self.num_epochs}, Train Loss: {train_loss:.4g}, Train Commitment Loss: {train_commit_loss:.4g}, '
                   f'Train Codebook Loss: {train_codebook_loss:.4g}, Train Reconstruction Loss: {train_recon_loss:.4g}, '
                   f'Train Dihedral Loss: {total_dihedral_loss:.4g}, Train AA Loss: {train_aa_loss:.4g}, '
                   f'Train Loop Length Loss: {train_loop_length_loss:.4g}, Train Pred Loop Length Loss: {train_pred_loop_length_loss:.4g}, Train Perplexity: {train_perplexity:.4g}')
@@ -284,7 +284,7 @@ class VQVAETrainer:
                             'Epoch Train Pred Loop Length Loss': train_pred_loop_length_loss})
             if self.val_loader is not None:
                 val_loss, val_commit_loss, val_codebook_loss, val_recon_loss, val_dihedral_loss, val_aa_loss, val_loop_length_loss, val_pred_loop_length_loss, val_perplexity = self.validate_epoch()
-                print(f'Epoch {epoch}/{self.num_epochs}, Validation Loss: {val_loss:.4g}, Validation Commitment Loss: {val_commit_loss:.4g}, '
+                print(f'Epoch {self.epoch}/{self.num_epochs}, Validation Loss: {val_loss:.4g}, Validation Commitment Loss: {val_commit_loss:.4g}, '
                       f'Validation Codebook Loss: {val_codebook_loss:.4g}, Validation Reconstruction Loss: {val_recon_loss:.4g}, '
                       f'Validation Dihedral Loss: {val_dihedral_loss:.4g}, Validation AA Loss: {val_aa_loss:.4g}, '
                       f'Validation Loop Length Loss: {val_loop_length_loss:4g}, Validation Pred Loop Length Loss: {val_pred_loop_length_loss:4g}, Validation Perplexity: {val_perplexity:.4g}')
