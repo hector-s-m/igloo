@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import wandb
 from glob import glob
 import json
 import os
@@ -70,6 +69,7 @@ class VQVAETrainer:
             self.ckpt_loss_file = os.path.join(self.save_dir, "model_loss.txt")
             
             if use_wandb:
+                import wandb
                 wandb.config.update({"save_dir": self.save_dir}, allow_val_change=True)
         else:
             self.ckpt_dir = None
@@ -110,6 +110,7 @@ class VQVAETrainer:
             output.loss.backward()
             self.optimizer.step()
             if self.use_wandb:
+                import wandb
                 wandb.log({'Train Loss': output.loss.item(), 'Epoch': self.epoch, 'Step': self.step, 'Reconstruction Loss': output.recon_loss.item(),
                         'Commitment Loss': output.commit_loss.item(), 'Codebook Loss': output.codebook_loss.item(), 'Dihedral Loss': output.dihedral_loss.item(),
                         'AA Loss': output.aa_loss.item()})
@@ -204,6 +205,7 @@ class VQVAETrainer:
         print(f"Validation: proportion correct: {proportion_correct:.4g}, phi: {phi:.4g}, psi: {psi:.4g}, omega: {omega:.4g}")
 
         if self.use_wandb:
+            import wandb
             wandb.log({'Epoch Validation Proportion Correct': proportion_correct, 'Epoch Validation Phi': phi, 'Epoch Validation Psi': psi, 'Epoch Validation Omega': omega,
                        'Epoch Validation num used codebook indices': len(torch.unique(quantized_indices_list)), 'Epoch Validation AA Recovery': aa_recovery,
                        'Epoch Validation num clusters with different lengths': num_clusters_with_different_lengths,
@@ -239,6 +241,7 @@ class VQVAETrainer:
                   f'Train Dihedral Loss: {total_dihedral_loss:.4g}, Train AA Loss: {train_aa_loss:.4g}, '
                   f'Train Loop Length Loss: {train_loop_length_loss:.4g}, Train Pred Loop Length Loss: {train_pred_loop_length_loss:.4g}, Train Perplexity: {train_perplexity:.4g}')
             if self.use_wandb:
+                import wandb
                 wandb.log({'Epoch Train Loss': train_loss, 'Epoch': self.epoch, 'Epoch Train Commitment Loss': train_commit_loss,
                             'Epoch Train Codebook Loss': train_codebook_loss, 'Epoch Train Reconstruction Loss': train_recon_loss,
                             'Epoch Train Perplexity': train_perplexity, 'Epoch Train Dihedral Loss': total_dihedral_loss,
@@ -251,6 +254,7 @@ class VQVAETrainer:
                       f'Validation Dihedral Loss: {val_dihedral_loss:.4g}, Validation AA Loss: {val_aa_loss:.4g}, '
                       f'Validation Loop Length Loss: {val_loop_length_loss:4g}, Validation Pred Loop Length Loss: {val_pred_loop_length_loss:4g}, Validation Perplexity: {val_perplexity:.4g}')
                 if self.use_wandb:
+                    import wandb
                     wandb.log({'Epoch Validation Loss': val_loss, 'Epoch Validation Commitment Loss': val_commit_loss,
                                'Epoch Validation Codebook Loss': val_codebook_loss, 'Epoch Validation Reconstruction Loss': val_recon_loss,
                                'Epoch Validation Dihedral Loss': val_dihedral_loss, 'Epoch Validation AA Loss': val_aa_loss,
@@ -258,4 +262,5 @@ class VQVAETrainer:
                                'Epoch Validation Perplexity': val_perplexity})
             self.epoch += 1
         if self.use_wandb:
+            import wandb
             wandb.finish()

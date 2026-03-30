@@ -3,7 +3,6 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
-import wandb
 from torch.nn import Module
 from torch.optim import AdamW
 from dataset import LoopSequenceDataset
@@ -124,7 +123,8 @@ def main(args):
     print("Number of model parameters:", sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     if args.use_wandb:
-        wandb.init(project="Igloo", config=args, dir="./wandb/", name=args.project_name)    
+        import wandb
+        wandb.init(project="Igloo", config=args, dir="./wandb/", name=args.project_name)
 
     trainer = VQVAETrainer(model, optimizer, train_dataloader, val_loader=val_loader, device=args.device, epochs=args.num_epochs,
                            use_wandb=args.use_wandb, save_dir=get_save_dir(args.save_dir), scheduler=scheduler, warmup_epochs=args.num_warmup_epochs)
