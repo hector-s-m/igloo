@@ -49,6 +49,7 @@ def parse_args():
     parser.add_argument("--save_dir", type=str, default=None, help="Directory to save model checkpoints")
     parser.add_argument("--project_name", type=str, default="VQVAE_Loop_Training", help="Project name for wandb")
     parser.add_argument("--use_wandb", action="store_true", help="Use wandb for logging")
+    parser.add_argument("--resume", action="store_true", help="Resume training from the latest checkpoint in save_dir")
 
     # Pretrained checkpoints
     parser.add_argument("--pretrained_model_weights", type=str, default=None, help="Path to pretrained model weights")
@@ -127,7 +128,8 @@ def main(args):
         wandb.init(project="Igloo", config=args, dir="./wandb/", name=args.project_name)
 
     trainer = VQVAETrainer(model, optimizer, train_dataloader, val_loader=val_loader, device=args.device, epochs=args.num_epochs,
-                           use_wandb=args.use_wandb, save_dir=get_save_dir(args.save_dir), scheduler=scheduler, warmup_epochs=args.num_warmup_epochs)
+                           use_wandb=args.use_wandb, save_dir=get_save_dir(args.save_dir, resume=args.resume),
+                           scheduler=scheduler, warmup_epochs=args.num_warmup_epochs, resume=args.resume)
     
     training_config = vars(args)
     with open(f"{trainer.save_dir}/training_config.json", "w") as f:

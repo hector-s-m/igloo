@@ -8,8 +8,11 @@ from evals.metrics import eval_clusters_length_independent
 import numpy as np
 from tqdm import tqdm
 
-def get_save_dir(save_dir):
+def get_save_dir(save_dir, resume=False):
     curr_versions = glob(f"{save_dir}/version_*", recursive=False)
+    if resume:
+        # Re-use an existing versioned dir (passed explicitly from run_train.sh)
+        return save_dir
     if not curr_versions:
         return f"{save_dir}/version_1"
     else:
@@ -42,9 +45,9 @@ def calculate_perplexity(quantized_indices, codebook_size):
 
 
 class VQVAETrainer:
-    def __init__(self, model, optimizer, train_loader, val_loader=None, 
+    def __init__(self, model, optimizer, train_loader, val_loader=None,
                  device='cpu', epochs=100, use_wandb=False,
-                 save_dir=None, scheduler=None, warmup_epochs=0):
+                 save_dir=None, scheduler=None, warmup_epochs=0, resume=False):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -64,16 +67,57 @@ class VQVAETrainer:
             os.makedirs(self.save_dir, exist_ok=True)
             self.ckpt_dir = os.path.join(self.save_dir, "checkpoints")
             os.makedirs(self.ckpt_dir, exist_ok=True)
-            with open(os.path.join(self.save_dir, "model_config.json"), 'w') as f:
-                json.dump(model.get_config(), f, indent=4)
             self.ckpt_loss_file = os.path.join(self.save_dir, "model_loss.txt")
-            
+
+            if resume:
+                self._resume()
+            else:
+                with open(os.path.join(self.save_dir, "model_config.json"), 'w') as f:
+                    json.dump(model.get_config(), f, indent=4)
+
             if use_wandb:
                 import wandb
                 wandb.config.update({"save_dir": self.save_dir}, allow_val_change=True)
         else:
             self.ckpt_dir = None
             self.ckpt_loss_file = None
+
+    def _find_latest_checkpoint(self):
+        """Return (path, epoch_number) of the most recent checkpoint, or (None, 0)."""
+        checkpoints = glob(os.path.join(self.ckpt_dir, "model_epoch_*.pt"))
+        if not checkpoints:
+            return None, 0
+        def _epoch_num(p):
+            return int(os.path.basename(p).replace("model_epoch_", "").replace(".pt", ""))
+        latest = max(checkpoints, key=_epoch_num)
+        return latest, _epoch_num(latest)
+
+    def _resume(self):
+        """Load the latest checkpoint and restore training state."""
+        ckpt_path, start_epoch = self._find_latest_checkpoint()
+        if ckpt_path is None:
+            # No checkpoints yet — fresh start, still need to write config
+            with open(os.path.join(self.save_dir, "model_config.json"), 'w') as f:
+                json.dump(self.model.get_config(), f, indent=4)
+            print("No checkpoint found — starting from scratch.")
+            return
+        state = torch.load(ckpt_path, map_location=self.device)
+        self.model.load_state_dict(state)
+        self.epoch = start_epoch + 1
+        self.step = start_epoch * len(self.train_loader) + 1
+        # Restore loss history so model_loss.txt is accurate after resuming
+        if os.path.exists(self.ckpt_loss_file):
+            with open(self.ckpt_loss_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if ':' in line:
+                        k, v = line.split(':', 1)
+                        try:
+                            self.ckpt_loss[k.strip()] = float(v.strip())
+                        except ValueError:
+                            pass
+        print(f"Resumed from {ckpt_path}")
+        print(f"Continuing from epoch {self.epoch}/{self.num_epochs}")
     
     def write_loss(self):
         sorted_loss = sorted(self.ckpt_loss.items(), key=lambda x: x[1])
@@ -231,7 +275,7 @@ class VQVAETrainer:
         return epoch_val_loss, epoch_commit_loss, epoch_codebook_loss, epoch_recon_loss, epoch_dihedral_loss, epoch_aa_loss, epoch_loop_length_loss, epoch_pred_loop_length_loss, perplexity
 
     def train(self):
-        for epoch in range(self.num_epochs):
+        while self.epoch <= self.num_epochs:
             train_loss, train_commit_loss, train_codebook_loss, train_recon_loss, total_dihedral_loss, train_aa_loss, train_loop_length_loss, train_pred_loop_length_loss, train_perplexity = self.train_epoch()
             if self.scheduler and epoch > self.warmup_epochs:
                 self.scheduler.step()

@@ -17,6 +17,8 @@ export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}$(pwd):$(pwd)/model:${_IGLOO_TMP
 SPLITS_DIR="splits"
 MODEL_DIR="Igloo_models"
 DEVICE="cuda"
+PHASE1_DIR="${MODEL_DIR}/version_1"
+PHASE2_DIR="${MODEL_DIR}/version_2"
 
 # Verify data exists
 if [[ ! -f "${SPLITS_DIR}/train.jsonl" ]] || [[ ! -f "${SPLITS_DIR}/val.jsonl" ]]; then
@@ -42,12 +44,13 @@ python train.py \
     --loop_length_tolerance 0 \
     --dihedral_loss \
     --learnable_codebook \
-    --save_dir "${MODEL_DIR}" \
-    --project_name "Phase 1: pretrain"
+    --save_dir "${PHASE1_DIR}" \
+    --project_name "Phase 1: pretrain" \
+    --resume
 
 # Find the best checkpoint from Phase 1
-PHASE1_DIR="${MODEL_DIR}/version_1"
-BEST_EPOCH=$(awk '{if(NR==1 || $2<min){min=$2; epoch=$1}} END{print epoch}' "${PHASE1_DIR}/model_loss.txt")
+# model_loss.txt format: "model_epoch_5.pt: 0.1234" — strip non-digits from key to get epoch number
+BEST_EPOCH=$(awk 'NF==2 { key=$1; gsub(/[^0-9]/, "", key); if (NR==1 || $2+0 < min+0) { min=$2+0; best=key } } END { print best }' "${PHASE1_DIR}/model_loss.txt")
 PHASE1_WEIGHTS="${PHASE1_DIR}/checkpoints/model_epoch_${BEST_EPOCH}.pt"
 PHASE1_CONFIG="${PHASE1_DIR}/model_config.json"
 echo "Best Phase 1 epoch: ${BEST_EPOCH} → ${PHASE1_WEIGHTS}"
@@ -73,8 +76,9 @@ python train.py \
     --weight_decay 1e-5 \
     --pretrained_model_weights "${PHASE1_WEIGHTS}" \
     --pretrained_model_config "${PHASE1_CONFIG}" \
-    --save_dir "${MODEL_DIR}" \
-    --project_name "Phase 2: finetune"
+    --save_dir "${PHASE2_DIR}" \
+    --project_name "Phase 2: finetune" \
+    --resume
 
 echo ""
 echo "=== Training complete ==="
