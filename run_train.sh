@@ -45,8 +45,7 @@ python train.py \
     --dihedral_loss \
     --learnable_codebook \
     --save_dir "${PHASE1_DIR}" \
-    --project_name "Phase 1: pretrain" \
-    --resume
+    --project_name "Phase 1: pretrain"
 
 # Find the best checkpoint from Phase 1
 # model_loss.txt format: "model_epoch_5.pt: 0.1234" — strip non-digits from key to get epoch number
@@ -77,8 +76,7 @@ python train.py \
     --pretrained_model_weights "${PHASE1_WEIGHTS}" \
     --pretrained_model_config "${PHASE1_CONFIG}" \
     --save_dir "${PHASE2_DIR}" \
-    --project_name "Phase 2: finetune" \
-    --resume
+    --project_name "Phase 2: finetune"
 
 echo ""
 echo "=== Training complete ==="

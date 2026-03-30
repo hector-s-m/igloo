@@ -8,11 +8,8 @@ from evals.metrics import eval_clusters_length_independent
 import numpy as np
 from tqdm import tqdm
 
-def get_save_dir(save_dir, resume=False):
+def get_save_dir(save_dir):
     curr_versions = glob(f"{save_dir}/version_*", recursive=False)
-    if resume:
-        # Re-use an existing versioned dir (passed explicitly from run_train.sh)
-        return save_dir
     if not curr_versions:
         return f"{save_dir}/version_1"
     else:
@@ -47,7 +44,7 @@ def calculate_perplexity(quantized_indices, codebook_size):
 class VQVAETrainer:
     def __init__(self, model, optimizer, train_loader, val_loader=None,
                  device='cpu', epochs=100, use_wandb=False,
-                 save_dir=None, scheduler=None, warmup_epochs=0, resume=False):
+                 save_dir=None, scheduler=None, warmup_epochs=0):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -68,13 +65,8 @@ class VQVAETrainer:
             self.ckpt_dir = os.path.join(self.save_dir, "checkpoints")
             os.makedirs(self.ckpt_dir, exist_ok=True)
             self.ckpt_loss_file = os.path.join(self.save_dir, "model_loss.txt")
-
-            if resume:
-                self._resume()
-            else:
-                with open(os.path.join(self.save_dir, "model_config.json"), 'w') as f:
-                    json.dump(model.get_config(), f, indent=4)
-
+            # Always auto-detect: resume if checkpoints exist, else start fresh
+            self._resume()
             if use_wandb:
                 import wandb
                 wandb.config.update({"save_dir": self.save_dir}, allow_val_change=True)
@@ -93,10 +85,9 @@ class VQVAETrainer:
         return latest, _epoch_num(latest)
 
     def _resume(self):
-        """Load the latest checkpoint and restore training state."""
+        """Resume from latest checkpoint if one exists, otherwise start fresh."""
         ckpt_path, start_epoch = self._find_latest_checkpoint()
         if ckpt_path is None:
-            # No checkpoints yet — fresh start, still need to write config
             with open(os.path.join(self.save_dir, "model_config.json"), 'w') as f:
                 json.dump(self.model.get_config(), f, indent=4)
             print("No checkpoint found — starting from scratch.")
