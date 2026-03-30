@@ -13,7 +13,7 @@ set -euo pipefail
 # and as the 'igloo' package (mapped via pyproject.toml: igloo -> model/)
 _IGLOO_TMP=$(mktemp -d)
 ln -s "$(pwd)/model" "${_IGLOO_TMP}/igloo"
-export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}$(pwd)/model:${_IGLOO_TMP}"
+export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}$(pwd):$(pwd)/model:${_IGLOO_TMP}"
 SPLITS_DIR="splits"
 MODEL_DIR="Igloo_models"
 DEVICE="cuda"
