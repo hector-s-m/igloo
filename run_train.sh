@@ -43,8 +43,7 @@ python train.py \
     --dihedral_loss \
     --learnable_codebook \
     --save_dir "${MODEL_DIR}" \
-    --project_name "Phase 1: pretrain" \
-    --use_wandb
+    --project_name "Phase 1: pretrain"
 
 # Find the best checkpoint from Phase 1
 PHASE1_DIR="${MODEL_DIR}/version_1"
@@ -75,8 +74,7 @@ python train.py \
     --pretrained_model_weights "${PHASE1_WEIGHTS}" \
     --pretrained_model_config "${PHASE1_CONFIG}" \
     --save_dir "${MODEL_DIR}" \
-    --project_name "Phase 2: finetune" \
-    --use_wandb
+    --project_name "Phase 2: finetune"
 
 echo ""
 echo "=== Training complete ==="
