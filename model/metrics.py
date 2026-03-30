@@ -385,7 +385,7 @@ def eval_clusters(angles: np.ndarray, cluster_index: np.ndarray, mask: np.ndarra
     weighted_proportion_within_threshold = np.sum(proportion_within_threshold * counts) / np.sum(counts)
     weighted_circular_variance = np.sum(circular_variance * counts[:, np.newaxis], axis=0) / np.sum(counts) # (3,) one for each angle
     
-    return float(weighted_proportion_within_threshold), *weighted_circular_variance.tolist()
+    return (float(weighted_proportion_within_threshold), *weighted_circular_variance.tolist())
 
 
 def eval_cluster_length_independent(input):
@@ -443,7 +443,7 @@ def eval_clusters_length_independent(angles: np.ndarray, loop_coords: np.ndarray
     weighted_proportion_within_threshold = np.sum(proportion_within_threshold * counts) / np.sum(counts)
     weighted_circular_variance = np.sum(circular_variance * counts[:, np.newaxis], axis=0) / np.sum(counts) # (3,) one for each angle
     
-    return float(weighted_proportion_within_threshold), *weighted_circular_variance.tolist()
+    return (float(weighted_proportion_within_threshold), *weighted_circular_variance.tolist())
 
 
 if __name__ == "__main__":
