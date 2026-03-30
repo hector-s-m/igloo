@@ -170,7 +170,9 @@ class VQVAE(nn.Module):
         with open(config_path, 'r') as f:
             config = json.load(f)
         model = cls(**config)
-        model.load_state_dict(torch.load(weights_path), strict=strict)
+        ckpt = torch.load(weights_path, map_location='cpu')
+        state_dict = ckpt['model_state_dict'] if isinstance(ckpt, dict) and 'model_state_dict' in ckpt else ckpt
+        model.load_state_dict(state_dict, strict=strict)
         return model
     
     def forward(self, batch, val = False):

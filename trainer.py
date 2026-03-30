@@ -92,11 +92,24 @@ class VQVAETrainer:
                 json.dump(self.model.get_config(), f, indent=4)
             print("No checkpoint found — starting from scratch.")
             return
-        state = torch.load(ckpt_path, map_location=self.device)
-        self.model.load_state_dict(state)
+
+        # Restore model weights
+        checkpoint = torch.load(ckpt_path, map_location=self.device)
+        # Support both bare state-dict saves and full checkpoint dicts
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            if self.optimizer is not None and 'optimizer_state_dict' in checkpoint:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        else:
+            # Legacy bare state-dict format
+            self.model.load_state_dict(checkpoint)
+
         self.epoch = start_epoch + 1
         self.step = start_epoch * len(self.train_loader) + 1
-        # Restore loss history so model_loss.txt is accurate after resuming
+
+        # Restore loss history so model_loss.txt stays accurate after resuming
         if os.path.exists(self.ckpt_loss_file):
             with open(self.ckpt_loss_file) as f:
                 for line in f:
@@ -172,11 +185,14 @@ class VQVAETrainer:
         epoch_pred_loop_length_loss = total_pred_loop_length_loss / len(self.train_loader)
 
         if self.save_dir:
-            model_state_dict = self.model.state_dict()
-            for key in model_state_dict:
-                if torch.is_tensor(model_state_dict[key]):
-                    model_state_dict[key] = model_state_dict[key].cpu()
-            torch.save(model_state_dict, os.path.join(self.ckpt_dir, f"model_epoch_{self.epoch}.pt"))
+            checkpoint = {
+                'model_state_dict': {k: v.cpu() if torch.is_tensor(v) else v
+                                     for k, v in self.model.state_dict().items()},
+                'optimizer_state_dict': self.optimizer.state_dict(),
+            }
+            if self.scheduler is not None:
+                checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+            torch.save(checkpoint, os.path.join(self.ckpt_dir, f"model_epoch_{self.epoch}.pt"))
 
         return epoch_loss, epoch_commit_loss, epoch_codebook_loss, epoch_recon_loss, epoch_dihedral_loss, epoch_aa_loss, epoch_loop_length_loss, epoch_pred_loop_length_loss, perplexity
 

@@ -3,11 +3,10 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.nn import Module
 from torch.optim import AdamW
 from dataset import LoopSequenceDataset
 from igloo.vqvae import VQVAE
-from trainer import VQVAETrainer, get_save_dir
+from trainer import VQVAETrainer
 from utils import seed_everything
 import json
 
