@@ -9,7 +9,11 @@ set -euo pipefail
 ###############################################################################
 
 # ── Configuration ────────────────────────────────────────────────────────────
-export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}$(pwd)/model"
+# Make model/ importable both as bare modules (dataset, trainer, etc.)
+# and as the 'igloo' package (mapped via pyproject.toml: igloo -> model/)
+_IGLOO_TMP=$(mktemp -d)
+ln -s "$(pwd)/model" "${_IGLOO_TMP}/igloo"
+export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}$(pwd)/model:${_IGLOO_TMP}"
 SPLITS_DIR="splits"
 MODEL_DIR="Igloo_models"
 DEVICE="cuda"
